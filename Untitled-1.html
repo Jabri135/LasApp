@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+  <meta charset="UTF-8">
+  <title>خريطة Esri + Windy متزامنة</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      direction: rtl;
+      font-family: sans-serif;
+    }
+    .container {
+      display: flex;
+      height: 100%;
+      width: 100%;
+    }
+    #esriMap {
+      flex: 1;
+      position: relative;
+    }
+    #windyFrame {
+      flex: 1;
+      border: none;
+    }
+    .esri-ui-top-right {
+      direction: ltr !important;
+    }
+  </style>
+
+  <!-- ArcGIS JS API -->
+  <link rel="stylesheet" href="https://js.arcgis.com/4.29/esri/themes/light/main.css">
+  <script src="https://js.arcgis.com/4.29/"></script>
+</head>
+<body>
+  <div class="container">
+    <div id="esriMap"></div>
+    <iframe id="windyFrame" src="" allowfullscreen></iframe>
+  </div>
+
+  <script>
+    require([
+      "esri/WebMap",
+      "esri/views/MapView",
+      "esri/widgets/LayerList",
+      "esri/widgets/Print"
+    ], function(WebMap, MapView, LayerList, Print) {
+
+      const webmap = new WebMap({
+        portalItem: {
+          id: "b008185a057f43909de8c33a3859263a"
+        }
+      });
+
+      const view = new MapView({
+        container: "esriMap",
+        map: webmap
+      });
+
+      const windyFrame = document.getElementById("windyFrame");
+
+      function updateWindy(lat, lon, zoom = 6) {
+        const windyURL = `https://embed.windy.com/embed.html?lat=${lat.toFixed(4)}&lon=${lon.toFixed(4)}&detailLat=${lat.toFixed(4)}&detailLon=${lon.toFixed(4)}&zoom=${zoom}&level=surface&overlay=clouds&product=ecmwf&menu=&message=true&marker=&calendar=now&pressure=&type=map&location=coordinates&detail=true&lang=ar`;
+        windyFrame.src = windyURL;
+      }
+
+      // بعد تحميل الخريطة
+      view.when(() => {
+        const center = view.center;
+        updateWindy(center.latitude, center.longitude, Math.floor(view.zoom));
+
+        // قائمة الطبقات
+        const layerList = new LayerList({
+          view: view
+        });
+        view.ui.add(layerList, "top-right");
+
+        // أداة الطباعة
+        const printWidget = new Print({
+          view: view,
+          printServiceUrl:
+            "https://utility.arcgisonline.com/arcgis/rest/services/Utilities/PrintingTools/GPServer/Export%20Web%20Map%20Task"
+        });
+        view.ui.add(printWidget, "top-right");
+      });
+
+      // عند التحريك
+      view.watch("center", (center) => {
+        updateWindy(center.latitude, center.longitude, Math.floor(view.zoom));
+      });
+
+    });
+  </script>
+</body>
+</html>
