@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Leaflet + Windy Sync</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    * {margin: 0; padding: 0; box-sizing: border-box;}
+    body {overflow: hidden; font-family: Arial, sans-serif; height: 100vh;}
+    .container {display: flex; height: 100vh; position: relative;}
+    .panel {height: 100%; overflow: hidden;}
+    #leaflet-map {width: 50%; height: 100%;}
+    #windy-container {width: 50%; height: 100%;}
+    #windy-iframe {width: 100%; height: 100%; border: none;}
+    .divider {width: 10px; background: #555; height: 100%; cursor: col-resize; position: relative; z-index: 1000;}
+    .divider-handle {position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 30px; height: 60px; background: #777; border-radius: 5px; cursor: col-resize;}
+    .coord-display {position: absolute; bottom: 10px; left: 10px; background: rgba(255,255,255,0.8); padding: 5px 10px; border-radius: 3px; font-size: 12px; z-index: 1000;}
+    .tools {position: absolute; top: 10px; left: 10px; z-index: 1000; display: flex; gap: 5px;}
+    .tools button {padding: 6px 10px; font-size: 12px; border: none; border-radius: 4px; cursor: pointer; background: #fff; box-shadow: 0 0 4px rgba(0,0,0,0.3);}
+    .tools label {padding: 6px 10px; font-size: 12px; border: none; border-radius: 4px; cursor: pointer; background: #fff; box-shadow: 0 0 4px rgba(0,0,0,0.3);}
+    .tools input[type="file"] {display: none;}
+    .coord-inputs {position: absolute; top: 50px; left: 10px; z-index: 1000; background: rgba(255, 255, 255, 0.8); padding: 10px; border-radius: 5px;}
+    .coord-inputs input {padding: 5px; margin: 5px; width: 100px;}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div id="leaflet-map" class="panel"></div>
+    <div class="divider" id="divider"><div class="divider-handle"></div></div>
+    <div id="windy-container" class="panel">
+      <iframe id="windy-iframe" src="https://embed.windy.com/embed.html?type=map&location=coordinates&metricRain=default&metricTemp=default&metricWind=default&zoom=6&overlay=wind&product=ecmwf&level=surface&lat=19.477&lon=55.833&detailLat=21.33&detailLon=55.833&detail=true&pressure=true&message=true&lang=ar"></iframe>
+    </div>
+    <div class="coord-display" id="coordDisplay">Lat: 0, Lng: 0</div>
+
+    <!-- الأدوات -->
+    <div class="tools">
+      <button onclick="resetMap()">🏠 Home</button>
+      <button onclick="printMap()">🖨️ Print</button>
+      <label style="cursor:pointer;">
+        📁 Add Data
+        <input type="file" accept=".geojson,.json" onchange="loadGeoJSON(event)">
+      </label>
+      <button onclick="toggleDataVisibility()">🔒 Hide Data</button>
+    </div>
+
+    <!-- إضافة حقول إدخال الإحداثيات -->
+    <div class="coord-inputs">
+      <label for="latInput">Latitude:</label>
+      <input type="number" id="latInput" placeholder="Latitude" step="any">
+      <label for="lngInput">Longitude:</label>
+      <input type="number" id="lngInput" placeholder="Longitude" step="any">
+      <button onclick="updateMapWithCoordinates()">Update Map</button>
+    </div>
+  </div>
+
+  <script>
+    const map = L.map('leaflet-map').setView([21.1981, 55.1178], 6);
+    const defaultView = { lat: 21.1981, lng: 55.1178, zoom: 6 };
+
+    const googleHybrid = L.tileLayer('https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
+      maxZoom: 20,
+      subdomains: ['mt0', 'mt1', 'mt2', 'mt3']
+    }).addTo(map);
+
+    let geojsonLayer = null;
+
+    const windyIframe = document.getElementById('windy-iframe');
+    let windyEmbedURL = "https://embed.windy.com/embed.html?type=map&location=coordinates&metricRain=default&metricTemp=default&metricWind=default&zoom=<<zoom>>&overlay=wind&product=ecmwf&level=surface&lat=<<lat>>&lon=<<lon>>&detailLat=<<lat>>&detailLon=<<lon>>&detail=true&pressure=true&message=true&lang=ar";
+    const coordDisplay = document.getElementById('coordDisplay');
+
+    function updateWindyView() {
+      const center = map.getCenter();
+      const zoom = map.getZoom();
+      coordDisplay.textContent = `Lat: ${center.lat.toFixed(4)}, Lng: ${center.lng.toFixed(4)}`;
+      const url = windyEmbedURL
+        .replaceAll("<<zoom>>", Math.floor(zoom))
+        .replaceAll("<<lat>>", center.lat.toFixed(4))
+        .replaceAll("<<lon>>", center.lng.toFixed(4));
+      windyIframe.src = url;
+    }
+
+    map.on('moveend', updateWindyView);
+    map.on('zoomend', updateWindyView);
+    setTimeout(updateWindyView, 2000);
+
+    const divider = document.getElementById('divider');
+    const leftPanel = document.getElementById('leaflet-map');
+    const rightPanel = document.getElementById('windy-container');
+    let isDragging = false;
+
+    divider.addEventListener('mousedown', () => {
+      isDragging = true;
+      document.body.style.cursor = 'col-resize';
+      leftPanel.style.userSelect = 'none';
+      rightPanel.style.userSelect = 'none';
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!isDragging) return;
+      const containerWidth = document.querySelector('.container').offsetWidth;
+      let leftWidth = (e.clientX / containerWidth) * 100;
+      leftWidth = Math.max(20, Math.min(80, leftWidth));
+      leftPanel.style.width = `${leftWidth}%`;
+      rightPanel.style.width = `${100 - leftWidth}%`;
+      setTimeout(() => {
+        map.invalidateSize();
+        updateWindyView();
+      }, 100);
+    });
+
+    document.addEventListener('mouseup', () => {
+      isDragging = false;
+      document.body.style.cursor = '';
+      leftPanel.style.userSelect = '';
+      rightPanel.style.userSelect = '';
+    });
+
+    window.addEventListener('resize', () => {
+      map.invalidateSize();
+      updateWindyView();
+    });
+
+    // زر العودة للوضع الافتراضي
+    function resetMap() {
+      map.setView([defaultView.lat, defaultView.lng], defaultView.zoom);
+    }
+
+    // طباعة الخريطة
+    function printMap() {
+      window.print();
+    }
+
+    // تحميل بيانات GeoJSON
+    function loadGeoJSON(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const geojson = JSON.parse(e.target.result);
+        if (geojsonLayer) map.removeLayer(geojsonLayer);
+        geojsonLayer = L.geoJSON(geojson).addTo(map);
+        map.fitBounds(geojsonLayer.getBounds());
+      };
+      reader.readAsText(file);
+    }
+
+    // إخفاء أو إظهار بيانات GeoJSON
+    function toggleDataVisibility() {
+      if (geojsonLayer) {
+        if (geojsonLayer._map) {
+          map.removeLayer(geojsonLayer);
+        } else {
+          geojsonLayer.addTo(map);
+        }
+      }
+    }
+
+    // تحديث الخريطة باستخدام الإحداثيات المدخلة
+    function updateMapWithCoordinates() {
+      const lat = parseFloat(document.getElementById('latInput').value);
+      const lng = parseFloat(document.getElementById('lngInput').value);
+
+      if (!isNaN(lat) && !isNaN(lng)) {
+        map.setView([lat, lng], 13);  // تغيير مستوى التكبير حسب الحاجة
+      }
+    }
+  </script>
+</body>
+</html>
